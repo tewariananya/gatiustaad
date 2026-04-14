@@ -1,21 +1,13 @@
 """
 POST /upload
-
-Accepts a PDF, image, or raw text.  On success:
-  - Parses and chunks the document
-  - Embeds chunks into the session's FAISS index
-  - Runs bike detection on the first few chunks (non-blocking; never fails the request)
-  - Returns session_id, detected bike_name (or null), and extracted section list
-
-Pass an existing `session_id` form field to append a second document to the same session.
-Omit it to create a fresh session.
+Accepts PDF, image, or raw text. Parses, chunks, embeds (locally), and stores.
+Returns session_id, detected bike_name, and extracted section list.
 """
 from datetime import datetime
 from typing import Optional
 
 from anthropic import AsyncAnthropic
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from openai import AsyncOpenAI
 
 from app.config import settings
 from app.models import DocumentInfo, DocumentType, UploadResponse
@@ -52,7 +44,6 @@ async def upload_document(
         raise HTTPException(status_code=400, detail="Provide either a `file` or `text` field.")
 
     session, _ = await session_store.get_or_create(session_id)
-    openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
     anthropic_client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
     # ── Extract pages ─────────────────────────────────────────────────────────
@@ -74,7 +65,7 @@ async def upload_document(
             except UnicodeDecodeError:
                 raise HTTPException(
                     status_code=415,
-                    detail=f"Unsupported file type '{ct}'. Upload a PDF, image (jpg/png/webp), or plain-text file.",
+                    detail=f"Unsupported file type '{ct}'. Upload a PDF, image, or plain-text file.",
                 )
     else:
         pages = extract_raw_text(text)  # type: ignore[arg-type]
@@ -82,23 +73,19 @@ async def upload_document(
         doc_type = DocumentType.text
 
     if not pages:
-        raise HTTPException(status_code=422, detail="No text could be extracted from the provided input.")
+        raise HTTPException(status_code=422, detail="No text could be extracted.")
 
-    # ── Chunk → embed → store ─────────────────────────────────────────────────
+    # ── Chunk → embed (local) → store ─────────────────────────────────────────
     chunks = chunk_pages(pages, chunk_size=settings.chunk_size, overlap=settings.chunk_overlap)
     if not chunks:
         raise HTTPException(status_code=422, detail="Document produced no text chunks.")
 
-    chunk_count = await add_chunks(session, chunks, filename, openai_client)
+    chunk_count = await add_chunks(session, chunks, filename)
 
-    # ── Collect unique sections and accumulate manual text ────────────────────
-    new_sections = list(dict.fromkeys(
-        p.section for p in pages if p.section
-    ))
-    for s in new_sections:
-        if s not in session.sections:
-            session.sections.append(s)
-
+    # ── Collect sections + manual text ────────────────────────────────────────
+    for p in pages:
+        if p.section and p.section not in session.sections:
+            session.sections.append(p.section)
     session.manual_text += "\n\n".join(p.text for p in pages) + "\n\n"
 
     session.documents.append(DocumentInfo(
@@ -109,7 +96,7 @@ async def upload_document(
         uploaded_at=datetime.utcnow(),
     ))
 
-    # ── Bike detection (best-effort; never raises) ────────────────────────────
+    # ── Bike detection (best-effort) ──────────────────────────────────────────
     if session.bike_info.name is None:
         bike_info = await detect_bike(session.chunks, anthropic_client)
         if bike_info.name:

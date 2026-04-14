@@ -1,40 +1,43 @@
 """
-Thin wrapper around OpenAI text-embedding-3-small.
+Local embeddings using sentence-transformers (all-MiniLM-L6-v2).
 
-Vectors are L2-normalised so they can be used directly with FAISS IndexFlatIP
-(inner product == cosine similarity for unit vectors).
+- No API key required
+- Runs entirely on CPU
+- 384-dimensional vectors, L2-normalised for cosine similarity via FAISS IndexFlatIP
+- Model is downloaded once on first use (~90 MB) and cached automatically
 """
+import asyncio
 from typing import List
 
+from typing import Optional
+
 import numpy as np
-from openai import AsyncOpenAI
+from sentence_transformers import SentenceTransformer
 
-from app.config import settings
-
-_BATCH_SIZE = 100  # OpenAI embeds up to 2048 inputs; 100 keeps requests small
-
-
-async def embed_texts(texts: List[str], client: AsyncOpenAI) -> np.ndarray:
-    """Return a (len(texts), embedding_dim) float32 array of unit vectors."""
-    all_vecs: List[np.ndarray] = []
-
-    for i in range(0, len(texts), _BATCH_SIZE):
-        batch = texts[i : i + _BATCH_SIZE]
-        response = await client.embeddings.create(
-            model=settings.embedding_model,
-            input=batch,
-        )
-        vecs = np.array([item.embedding for item in response.data], dtype=np.float32)
-        all_vecs.append(vecs)
-
-    matrix = np.vstack(all_vecs)
-    # Normalise rows → cosine similarity via dot product
-    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
-    norms = np.where(norms == 0, 1.0, norms)
-    return matrix / norms
+_MODEL_NAME = "all-MiniLM-L6-v2"
+_model: Optional[SentenceTransformer] = None
 
 
-async def embed_query(text: str, client: AsyncOpenAI) -> np.ndarray:
-    """Return a single (embedding_dim,) float32 unit vector."""
-    matrix = await embed_texts([text], client)
+def _get_model() -> SentenceTransformer:
+    global _model
+    if _model is None:
+        _model = SentenceTransformer(_MODEL_NAME)
+    return _model
+
+
+def _encode(texts: List[str]) -> np.ndarray:
+    model = _get_model()
+    vecs = model.encode(texts, convert_to_numpy=True, normalize_embeddings=True)
+    return vecs.astype(np.float32)
+
+
+async def embed_texts(texts: List[str]) -> np.ndarray:
+    """Return a (len(texts), 384) float32 array of unit vectors."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _encode, texts)
+
+
+async def embed_query(text: str) -> np.ndarray:
+    """Return a single (384,) float32 unit vector."""
+    matrix = await embed_texts([text])
     return matrix[0]

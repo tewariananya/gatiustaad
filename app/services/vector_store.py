@@ -1,19 +1,16 @@
 """
 FAISS operations scoped to a single SessionData object.
-
-IndexFlatIP with L2-normalised vectors → inner product == cosine similarity.
+Uses local sentence-transformers embeddings (no OpenAI dependency).
 """
 from typing import List, Tuple
 
 import numpy as np
-from openai import AsyncOpenAI
 
 from app.models import Confidence
 from app.services.chunker import TextChunk
 from app.services.embeddings import embed_texts
 from app.session_store import ChunkRecord, SessionData
 
-# Cosine similarity threshold above which we call it a "direct match"
 DIRECT_MATCH_THRESHOLD = 0.70
 
 
@@ -25,14 +22,13 @@ async def add_chunks(
     session: SessionData,
     chunks: List[TextChunk],
     document_name: str,
-    openai_client: AsyncOpenAI,
 ) -> int:
     """Embed chunks, add to session index, return count added."""
     if not chunks:
         return 0
 
     session.init_index()
-    vectors = await embed_texts([c.text for c in chunks], openai_client)
+    vectors = await embed_texts([c.text for c in chunks])
 
     start_id = len(session.chunks)
     session.index.add(vectors)  # type: ignore[union-attr]
@@ -55,10 +51,7 @@ def search(
     query_vector: np.ndarray,
     top_k: int = 5,
 ) -> Tuple[List[ChunkRecord], float]:
-    """
-    Return (chunks, top_score).
-    top_score is the cosine similarity of the best hit (0.0 if index is empty).
-    """
+    """Return (chunks, top_score)."""
     if session.index is None or session.index.ntotal == 0:
         return [], 0.0
 

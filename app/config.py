@@ -2,11 +2,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    openai_api_key: str
-    anthropic_api_key: str
+    anthropic_api_key: str          # only API key needed now
 
-    embedding_model: str = "text-embedding-3-small"
-    embedding_dim: int = 1536
+    embedding_dim: int = 384        # all-MiniLM-L6-v2 output size
     claude_model: str = "claude-sonnet-4-20250514"
 
     chunk_size: int = 600
