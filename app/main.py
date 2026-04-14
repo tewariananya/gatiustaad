@@ -1,7 +1,23 @@
+import asyncio
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import chat, session, upload
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Pre-load the embedding model at startup so the first user request
+    is not slow. fastembed downloads the model (~24 MB) on first call
+    and caches it; subsequent restarts load from cache in seconds.
+    """
+    from app.services.embeddings import _get_model
+    await asyncio.to_thread(_get_model)
+    yield
+
 
 app = FastAPI(
     title="GatiUstaad",
@@ -12,10 +28,10 @@ app = FastAPI(
         "with page-level citations."
     ),
     version="1.2.0",
+    lifespan=lifespan,
 )
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
-# Allow the Lovable frontend and local dev origins.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

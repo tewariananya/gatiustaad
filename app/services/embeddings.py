@@ -1,40 +1,39 @@
 """
-Local embeddings using sentence-transformers (all-MiniLM-L6-v2).
+Local embeddings using fastembed (ONNX Runtime, no PyTorch).
 
 - No API key required
-- Runs entirely on CPU
-- 384-dimensional vectors, L2-normalised for cosine similarity via FAISS IndexFlatIP
-- Model is downloaded once on first use (~90 MB) and cached automatically
+- ~150 MB total footprint — safe on Render free tier (512 MB)
+- 384-dimensional vectors, already L2-normalised by fastembed
+- Model (~24 MB) is downloaded once and cached automatically
 """
 import asyncio
-from typing import List
-
-from typing import Optional
+from typing import List, Optional
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 
-_MODEL_NAME = "all-MiniLM-L6-v2"
-_model: Optional[SentenceTransformer] = None
+_MODEL_NAME = "BAAI/bge-small-en-v1.5"
+_model: Optional[TextEmbedding] = None
 
 
-def _get_model() -> SentenceTransformer:
+def _get_model() -> TextEmbedding:
+    """Load model once; reuse on every subsequent call."""
     global _model
     if _model is None:
-        _model = SentenceTransformer(_MODEL_NAME)
+        _model = TextEmbedding(_MODEL_NAME)
     return _model
 
 
 def _encode(texts: List[str]) -> np.ndarray:
     model = _get_model()
-    vecs = model.encode(texts, convert_to_numpy=True, normalize_embeddings=True)
-    return vecs.astype(np.float32)
+    # fastembed returns a generator of (384,) float32 arrays, already normalised
+    embeddings = list(model.embed(texts))
+    return np.array(embeddings, dtype=np.float32)
 
 
 async def embed_texts(texts: List[str]) -> np.ndarray:
     """Return a (len(texts), 384) float32 array of unit vectors."""
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _encode, texts)
+    return await asyncio.to_thread(_encode, texts)
 
 
 async def embed_query(text: str) -> np.ndarray:
