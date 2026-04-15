@@ -13,7 +13,6 @@ from fastapi.responses import StreamingResponse
 
 from app.config import settings
 from app.models import ChatRequest, FeedbackRequest
-from app.services.embeddings import embed_query
 from app.services.llm import RAG_SYSTEM, build_citations, build_rag_user_content, describe_image
 from app.services.vector_store import score_to_confidence, search
 from app.session_store import ChatMessage, session_store
@@ -52,7 +51,7 @@ async def chat(request: ChatRequest) -> StreamingResponse:
     session = await session_store.get_session(request.session_id)
     if session is None:
         raise HTTPException(404, detail=f"Session '{request.session_id}' not found.")
-    if session.index is None or session.index.ntotal == 0:
+    if not session.chunks:
         raise HTTPException(422, detail="No documents uploaded to this session yet.")
 
     anthropic_client = AsyncAnthropic(api_key=settings.anthropic_api_key)
@@ -65,9 +64,8 @@ async def chat(request: ChatRequest) -> StreamingResponse:
         )
         retrieval_query = f"{request.message}\n\nImage observation: {image_description}"
 
-    # ── Retrieval (local embeddings) ──────────────────────────────────────────
-    query_vec = await embed_query(retrieval_query)
-    chunks, top_score = search(session, query_vec, top_k=settings.top_k)
+    # ── Retrieval (BM25 keyword search) ──────────────────────────────────────
+    chunks, top_score = search(session, retrieval_query, top_k=settings.top_k)
     if not chunks:
         raise HTTPException(422, detail="No relevant context found.")
 

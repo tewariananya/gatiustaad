@@ -2,15 +2,12 @@ import asyncio
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-import faiss
-
-from app.config import settings
 from app.models import BikeInfo, Citation, DocumentInfo
 
 
-# ── Chunk record (parallel to FAISS index) ────────────────────────────────────
+# ── Chunk record ──────────────────────────────────────────────────────────────
 
 @dataclass
 class ChunkRecord:
@@ -51,15 +48,11 @@ class SessionData:
     bike_info: BikeInfo = field(default_factory=BikeInfo)
     documents: List[DocumentInfo] = field(default_factory=list)
     chunks: List[ChunkRecord] = field(default_factory=list)
-    sections: List[str] = field(default_factory=list)  # unique section headings
-    manual_text: str = ""              # full extracted text for /manual preview
-    index: Optional[faiss.IndexFlatIP] = None
+    sections: List[str] = field(default_factory=list)
+    manual_text: str = ""
+    bm25: Any = None                   # BM25Okapi instance, rebuilt on each upload
     threads: Dict[str, ChatThread] = field(default_factory=dict)
     query_count: int = 0
-
-    def init_index(self) -> None:
-        if self.index is None:
-            self.index = faiss.IndexFlatIP(settings.embedding_dim)
 
     def get_or_create_thread(self, thread_id: Optional[str]) -> ChatThread:
         if thread_id and thread_id in self.threads:

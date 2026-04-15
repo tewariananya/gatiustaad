@@ -2,10 +2,8 @@ fastapi
 uvicorn[standard]
 python-multipart
 pymupdf
-faiss-cpu
-fastembed
+rank-bm25
 anthropic
-numpy<2.0
 pydantic-settings
 python-dotenv
 pillow
