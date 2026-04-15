@@ -1,6 +1,6 @@
 """
 FAISS operations scoped to a single SessionData object.
-Uses local sentence-transformers embeddings (no OpenAI dependency).
+Uses local fastembed embeddings (no OpenAI dependency).
 """
 from typing import List, Tuple
 
